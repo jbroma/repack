@@ -110,7 +110,7 @@ module.exports = (env) => {
         mode,
         platform,
         devServer,
-        output: { enabled: false },
+        output: {},
       }),
       new Repack.plugins.ModuleFederationPlugin({
         name: 'MiniApp',
