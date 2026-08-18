@@ -49,6 +49,14 @@ export function createBoundCommands(bundler: Bundler) {
       _: string[],
       cliConfig: CliConfig,
       args: BundleArguments & StartArguments
-    ) => cmd.func(_, cliConfig, args, bundler),
+    ) => {
+      if (args.bundler && args.bundler !== bundler) {
+        console.warn(
+          `[Re.Pack] Ignoring "--bundler ${args.bundler}" because the deprecated "@callstack/repack/commands/${bundler}" entry point explicitly selects ${bundler}. Use "@callstack/repack/commands" to select a bundler with --bundler.`
+        );
+      }
+
+      return cmd.func(_, cliConfig, args, bundler);
+    },
   }));
 }
