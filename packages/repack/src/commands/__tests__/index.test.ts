@@ -26,7 +26,7 @@ describe('createBoundCommands', () => {
     await command.func([], cliConfig, { ...args, bundler: 'rspack' });
 
     expect(consoleWarn).toHaveBeenCalledWith(
-      '[Re.Pack] Ignoring "--bundler rspack" because the deprecated "@callstack/repack/commands/webpack" entry point explicitly selects webpack. Use "@callstack/repack/commands" to select a bundler with --bundler.'
+      'Ignoring "--bundler rspack" because the deprecated "@callstack/repack/commands/webpack" entry point explicitly selects webpack. Use "@callstack/repack/commands" to select a bundler with --bundler.'
     );
     expect(bundle).toHaveBeenCalledWith(
       [],

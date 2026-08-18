@@ -52,7 +52,7 @@ export function createBoundCommands(bundler: Bundler) {
     ) => {
       if (args.bundler && args.bundler !== bundler) {
         console.warn(
-          `[Re.Pack] Ignoring "--bundler ${args.bundler}" because the deprecated "@callstack/repack/commands/${bundler}" entry point explicitly selects ${bundler}. Use "@callstack/repack/commands" to select a bundler with --bundler.`
+          `Ignoring "--bundler ${args.bundler}" because the deprecated "@callstack/repack/commands/${bundler}" entry point explicitly selects ${bundler}. Use "@callstack/repack/commands" to select a bundler with --bundler.`
         );
       }
 
