@@ -70,7 +70,7 @@ describe('Compiler – lazy compilation', () => {
     ];
   }
 
-  describe('watchRun gate', () => {
+  describe('platform activation', () => {
     let compiler: Compiler;
 
     beforeAll(() => {
@@ -150,12 +150,12 @@ describe('Compiler – lazy compilation', () => {
       );
     });
 
-    it('resolves when both platform gates are still held (no getAsset calls)', async () => {
+    it('resolves when both platform compilations are pending', async () => {
       const compiler = new Compiler(createConfigs(), reporter, tmpDir);
       compiler.setDevServerContext(mockDevServerContext);
       compiler.start();
 
-      // Gates are held for both platforms — close() should release them
+      // Both platform compilations are pending — close() should resume them
       await new Promise<void>((resolve, reject) => {
         compiler.close((error) => (error ? reject(error) : resolve()));
       });

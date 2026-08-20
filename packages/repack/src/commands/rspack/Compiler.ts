@@ -28,9 +28,8 @@ export class Compiler {
   // late-init
   devServerContext!: Server.DelegateContext;
 
-  private watchRunGates: Map<string, () => void> = new Map();
-  private activePlatforms: Set<string> = new Set();
-  private buildStartTime: Record<string, number> = {};
+  private pendingCompilations = new Map<string, () => void>();
+  private activePlatforms = new Set<string>();
   private isClosed = false;
 
   constructor(
@@ -39,7 +38,6 @@ export class Compiler {
     private rootDir: string
   ) {
     const handler = (platform: string, value: number) => {
-      // Skip progress for platforms not yet activated
       if (!this.activePlatforms.has(platform)) return;
 
       const percentage = Math.floor(value * 100);
@@ -109,32 +107,31 @@ export class Compiler {
   private setupChildCompilerHooks(childCompiler: RspackCompiler) {
     const platform = childCompiler.options.name!;
 
-    // Gate: hold unrequested platforms at watchRun
-    childCompiler.hooks.watchRun.tapAsync('repack:gate', (_compiler, done) => {
-      if (this.activePlatforms.has(platform)) {
-        done();
-      } else {
-        this.watchRunGates.set(platform, done);
-      }
-    });
+    childCompiler.hooks.watchRun.tapAsync(
+      'repack:lazy-compilation',
+      (_compiler, done) => {
+        if (this.activePlatforms.has(platform)) {
+          done();
+          return;
+        }
 
-    // Notify build start only for active platforms
+        this.pendingCompilations.set(platform, () => {
+          // Exclude time spent waiting for the platform to be requested and
+          // avoid replaying file changes that happened before that request.
+          if (childCompiler.watching) {
+            const startTime = Date.now();
+            childCompiler.watching.startTime = startTime;
+            childCompiler.watching.lastWatcherStartTime = startTime;
+          }
+          done();
+        });
+      }
+    );
+
     childCompiler.hooks.watchRun.tap('repack:watch', () => {
       if (!this.activePlatforms.has(platform)) return;
 
-      // Fix: #go() set startTime and lastWatcherStartTime at server startup
-      // (before the gate held). After gate release the stale values cause
-      // _done() to create a watcher that sees phantom file changes since
-      // server start, triggering a spurious rebuild. Resetting both here
-      // is safe for non-gated rebuilds too — #go() set them moments before
-      // watchRun fired.
-      if (childCompiler.watching) {
-        childCompiler.watching.startTime = Date.now();
-        childCompiler.watching.lastWatcherStartTime = Date.now();
-      }
-
       this.isCompilationInProgress[platform] = true;
-      this.buildStartTime[platform] = Date.now();
 
       if (platform === 'android') {
         void runAdbReverse({
@@ -162,7 +159,6 @@ export class Compiler {
     });
 
     childCompiler.hooks.done.tap('repack:done', (stats) => {
-      const buildEndTime = Date.now();
       const childStats = stats.toJson({
         all: false,
         assets: true,
@@ -172,8 +168,6 @@ export class Compiler {
         errors: true,
         warnings: true,
       });
-
-      const previousHash = this.statsCache[platform]?.hash;
 
       try {
         this.devServerContext.broadcastToHmrClients<HMRMessage>({
@@ -242,15 +236,12 @@ export class Compiler {
         action: 'ok',
         body: { name: platform },
       });
-      if (childStats.hash !== previousHash) {
-        const time = buildEndTime - this.buildStartTime[platform];
-        this.reporter.process({
-          issuer: 'DevServer',
-          message: [{ progress: { platform, time } }],
-          timestamp: Date.now(),
-          type: 'progress',
-        });
-      }
+      this.reporter.process({
+        issuer: 'DevServer',
+        message: [{ progress: { platform, time: childStats.time } }],
+        timestamp: Date.now(),
+        type: 'progress',
+      });
     });
   }
 
@@ -262,10 +253,10 @@ export class Compiler {
     this.activePlatforms.add(platform);
     this.isCompilationInProgress[platform] = true;
 
-    const gate = this.watchRunGates.get(platform);
-    if (gate) {
-      this.watchRunGates.delete(platform);
-      gate();
+    const resumeCompilation = this.pendingCompilations.get(platform);
+    if (resumeCompilation) {
+      this.pendingCompilations.delete(platform);
+      resumeCompilation();
     }
   }
 
@@ -285,11 +276,11 @@ export class Compiler {
       this.callPendingResolvers(platform, error);
     });
 
-    // Release all held gates so Watching instances can complete and close cleanly
-    for (const [, gate] of this.watchRunGates) {
-      gate();
+    // Resume pending compilations so Watching instances can close cleanly
+    for (const resumeCompilation of this.pendingCompilations.values()) {
+      resumeCompilation();
     }
-    this.watchRunGates.clear();
+    this.pendingCompilations.clear();
     this.compiler.close(callback);
   }
 
@@ -302,7 +293,6 @@ export class Compiler {
       throw new Error('Compiler closed before compilation completed');
     }
 
-    // Activate compiler for this platform on first request
     this.activatePlatform(platform);
 
     // Return file from assetsCache if exists
